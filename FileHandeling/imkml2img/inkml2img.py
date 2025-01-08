@@ -260,7 +260,7 @@ def inkml2img(input_path: str, output_path: str, color='black') -> None:
     dpi = 100
     fig = plt.gcf()
     fig.set_size_inches(320 / dpi, 160 / dpi)
-    plt.savefig(output_path, bbox_inches='tight', dpi=dpi)
+    plt.savefig(output_path, dpi=dpi)
     plt.show()
     plt.gcf().clear()
 

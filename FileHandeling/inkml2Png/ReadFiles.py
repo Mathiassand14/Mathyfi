@@ -13,8 +13,7 @@ def convert_to_png(filename: str) -> str:
 
 if __name__ == "__main__":
     
-    
-    path = ""
+    path = "FileHandeling/inkml2Png/000bb64516a3f3ac.inkml"
     convert_to_png(path)
     
     #dir = "mathwriting-2024\\train\\"
