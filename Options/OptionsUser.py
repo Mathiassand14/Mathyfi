@@ -1,4 +1,4 @@
-from Options import Options
+from Options.Options import Options
 
 class OptionsUser(Options):
     def __init__(self):

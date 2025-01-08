@@ -1,9 +1,7 @@
 import os
-from fileinput import filename
-from typing import Tuple
 from tqdm import tqdm
 
-from imkml2img.inkml2img import inkml2img
+from FileHandeling.imkml2img.inkml2img import inkml2img
 
 def convert_to_png(filename: str) -> str:
     """
