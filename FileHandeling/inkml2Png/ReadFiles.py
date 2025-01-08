@@ -13,13 +13,17 @@ def convert_to_png(filename: str) -> str:
 
 if __name__ == "__main__":
     
-    dir = "mathwriting-2024\\train\\"
-    for filename in tqdm(os.listdir(dir), desc="Converting files"):
-        file = dir + filename
-        print(file)
-        if filename.endswith(".inkml"):
-            r: str = convert_to_png(file)
-            os.remove(r)
+    
+    path = ""
+    convert_to_png(path)
+    
+    #dir = "mathwriting-2024\\train\\"
+    #for filename in tqdm(os.listdir(dir), desc="Converting files"):
+    #    file = dir + filename
+    #    print(file)
+    #    if filename.endswith(".inkml"):
+    #        r: str = convert_to_png(file)
+    #        os.remove(r)
 
     # delete the file
     
