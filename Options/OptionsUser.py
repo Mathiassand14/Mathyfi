@@ -2,9 +2,9 @@ from Options.Options import Options
 
 class OptionsUser(Options):
     def __init__(self):
-        self.SUPER = super()
+        super().__init__()
         
         
     PathToMathWriting = "PathToMathWriting"
-    PathToHASY = "PathToHASY"
+    PathToHMSD = "A:\Overførsler\data\extracted_images"
     
