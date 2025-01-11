@@ -230,3 +230,4 @@ cython_debug/
 
 !/Options/OptionsUser.py
 !/Options/OptionsUser.py
+!/.venv/
