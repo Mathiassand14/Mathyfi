@@ -228,7 +228,8 @@ def draw_pattern(trace_group, box_size):
     return pattern_drawn
 
 
-def inkml2img(input_path: str, output_path: str, color='black') -> None:
+def inkml2img(input_path: str, output_path: str, color='black', show: bool = False,
+    size: Tuple[int, int] = (200,50)) -> None:
     print(output_path)
     traces = get_traces_data(input_path)
     for elem in traces:
@@ -248,7 +249,7 @@ def inkml2img(input_path: str, output_path: str, color='black') -> None:
             #    continue
             #print(dat)
             x, y, _ = zip(*data)
-            plt.plot(x, y, linewidth=2, c=color)
+            plt.plot(x, y, linewidth=0.5, c=color)
     plt.gca().invert_yaxis()
     plt.gca().set_aspect('equal', adjustable='box')
     plt.gca().get_xaxis().set_visible(False)
@@ -259,13 +260,15 @@ def inkml2img(input_path: str, output_path: str, color='black') -> None:
     plt.gca().spines['left'].set_visible(False)
     dpi = 100
     fig = plt.gcf()
-    fig.set_size_inches(320 / dpi, 160 / dpi)
+    print(size)
+    fig.set_size_inches(size[0] / dpi, size[1] / dpi)
     plt.savefig(output_path, dpi=dpi)
-    plt.show()
+    if show:
+        plt.show()
     plt.gcf().clear()
 
 
 if __name__ == "__main__":
     input_inkml = "200923-1556-49.inkml"
     output_path = "200923-1556-49.png"
-    inkml2img(input_inkml, output_path, color='#284054')
+    inkml2img(input_inkml, output_path, color='#284054', show=True, size=(200,40))
