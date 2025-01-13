@@ -29,5 +29,6 @@ if __name__ == "__main__":
     csv_filename = "mathwriting-2024.csv"
     commands = extract_latex_commands(csv_filename)
     print("Unique LaTeX-like tokens after backslashes:")
+    print(f"Total: {len(commands)}")
     for cmd in commands:
         print(cmd)

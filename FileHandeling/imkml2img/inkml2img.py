@@ -230,7 +230,7 @@ def draw_pattern(trace_group, box_size):
 
 def inkml2img(input_path: str, output_path: str, color='black', show: bool = False,
     size: Tuple[int, int] = (200,50)) -> None:
-    print(output_path)
+    #print(output_path)
     traces = get_traces_data(input_path)
     for elem in traces:
         ls = elem['trace_group']
@@ -260,7 +260,7 @@ def inkml2img(input_path: str, output_path: str, color='black', show: bool = Fal
     plt.gca().spines['left'].set_visible(False)
     dpi = 100
     fig = plt.gcf()
-    print(size)
+    #print(size)
     fig.set_size_inches(size[0] / dpi, size[1] / dpi)
     plt.savefig(output_path, dpi=dpi)
     if show:

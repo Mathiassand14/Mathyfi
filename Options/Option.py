@@ -33,3 +33,13 @@ class Option(ABC):
     @abstractmethod
     def PathToLetterValidation(cls) -> str:
         pass
+    
+    @cpu.class_property
+    @abstractmethod
+    def PathToLetterNet(cls) -> str:
+        pass
+    
+    @cpu.class_property
+    @abstractmethod
+    def PathToMathWritingLmdbTrain(cls) -> str:
+        pass

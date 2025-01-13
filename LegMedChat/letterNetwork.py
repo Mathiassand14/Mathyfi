@@ -10,8 +10,7 @@ from tqdm import tqdm
 
 from Options.OptionsUser import OptionsUser as option
 from FileHandeling.Data_HMSD import defalt_dict
-import FileHandeling.Data_HMSD
-import FileHandeling.Data_split_HMSD
+
 
 if __name__ == "__main__":
     
@@ -139,7 +138,7 @@ if __name__ == "__main__":
         torch.nn.Dropout(dropout_rate)  #
     ).to(device)
     # endregion
-    
+    print(f"num parameters: {sum(p.numel() for p in net.parameters())}")
     # region Loss and optimizer
     loss_function = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
@@ -193,7 +192,7 @@ if __name__ == "__main__":
             accuracy_metric.update(out, y)
         
         # Update accuracy metric
-        torch.save(net.state_dict(), 'net.pt')
+        torch.save(net.state_dict(), os.path.join(option.PathToLetterNet,f"net{epoch}.pt"))
         print(f"Epoch: {epoch}, Accuracy: {accuracy_metric.compute(), train_accuracy_metric.compute()}")
         with open("accuracy.csv", "a") as acc:
             acc.write(f"{epoch},{accuracy_metric.compute()},{train_accuracy_metric.compute()}\n")
