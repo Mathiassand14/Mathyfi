@@ -36,8 +36,12 @@ class OptionsUser(Option):
         return r"A:\OneDrive - Danmarks Tekniske Universitet\Mathify\net"
     
     @cpu.class_property
-    def PathToMathWritingLmdbTrain(cls) -> str:
-        return r"A:\OneDrive - Danmarks Tekniske Universitet\Mathify\mathwriting_train"
+    def PathToTextLmdb(cls) -> str:
+        return r"A:\Documents\Mathyfi\TextLmdb"
+    
+    @cpu.class_property
+    def PathToText(cls) -> str:
+        return r"A:\OneDrive - Danmarks Tekniske Universitet\Mathify\Text"
 
 if __name__ == "__main__":
     print(OptionsUser.PathToMathWriting)

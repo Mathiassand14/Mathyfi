@@ -41,5 +41,10 @@ class Option(ABC):
     
     @cpu.class_property
     @abstractmethod
-    def PathToMathWritingLmdbTrain(cls) -> str:
+    def PathToTextLmdb(cls) -> str:
+        pass
+    
+    @cpu.class_property
+    @abstractmethod
+    def PathToText(cls) -> str:
         pass

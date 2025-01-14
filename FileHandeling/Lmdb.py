@@ -1,40 +1,41 @@
+import shutil
+
 import lmdb
 import pickle
 import cv2
 import os
 
-def create_lmdb(db_path, data_dir):
+def create_lmdb(db_path, data):
     """
-    db_path: path to the LMDB file to create (e.g., './my_dataset.lmdb')
-    data_dir: directory containing your images (JPEG, PNG, etc.)
+    Create an LMDB database and store key-value pairs provided in a dictionary.
+
+    Parameters:
+    - db_path: The path to create the LMDB database (e.g., './database.lmdb')
+    - data: A dictionary containing key-value pairs to store in LMDB.
+            Keys must be strings, and values can be any serializable object.
     """
-    # map_size sets the maximum size (in bytes) of the database
-    # Make sure to pick something large enough for your dataset
-    env = lmdb.open(db_path, map_size=1e11)  # 1e12 = 1 TB max size, adjust as needed
+    # If the LMDB path already exists, clear it to avoid conflicts
+    if os.path.exists(db_path):
+        shutil.rmtree(db_path)  # Remove the old LMDB directory if it exists
     
-    with env.begin(write=True) as txn:
-        # Loop through your image directory
-        for i, filename in enumerate(sorted(os.listdir(data_dir))):
-            # Skip non-image files if needed
-            if not (filename.lower().endswith('.jpg') or filename.lower().endswith('.png')):
-                continue
-            
-            path = os.path.join(data_dir, filename)
-            # Read the image (using OpenCV here, but you could use PIL or another library)
-            img = cv2.imread(path, cv2.IMREAD_COLOR)
-            if img is None:
-                continue  # skip broken images
-            
-            # Serialize (pickle) the image array
-            data = pickle.dumps(img, protocol=pickle.HIGHEST_PROTOCOL)
-            
-            # Construct a key; keys must be bytes
-            key = f"image-{i}".encode("ascii")
-            # Put the (key, value) in the LMDB
-            txn.put(key, data)
+    # Dynamically calculate the required map_size based on data size and add some buffer
+    total_size = sum(len(pickle.dumps(value, protocol = pickle.HIGHEST_PROTOCOL)) for value in data.values())
+    map_size = int(total_size * 1.5)  # Add a 50% buffer to the required size
+    
+    # Create the LMDB environment with the calculated map_size
+    env = lmdb.open(db_path, map_size = map_size)
+    
+    with env.begin(write = True) as txn:
+        # Loop through the dictionary and insert key-value pairs
+        for key, value in data.items():
+            # Serialize the value
+            serialized_value = pickle.dumps(value, protocol = pickle.HIGHEST_PROTOCOL)
+            # Encode key as bytes (LMDB requires keys to be bytes)
+            txn.put(key.encode('ascii'), serialized_value)
     
     env.close()
-    print(f"Created LMDB at: {db_path}")
+    print(f"Created LMDB at: {db_path}, with map_size: {map_size} bytes")
+
 
 # Example usage:
 # create_lmdb("./my_images.lmdb", "./images_folder")
@@ -61,3 +62,27 @@ def read_from_lmdb(db_path, key_str):
 # if loaded_img is not None:
 #     cv2.imshow("LMDB Image", loaded_img)
 #     cv2.waitKey(0)
+
+def read_entire_lmdb(db_path):
+    """
+    Reads and returns the entire content of the LMDB database.
+    
+    Parameters:
+    - db_path: Path to the LMDB file (e.g., './my_dataset.lmdb')
+    
+    Returns:
+    - A dictionary containing key-value pairs where:
+        - Keys are string identifiers.
+        - Values are the deserialized objects (e.g., images, labels, etc.).
+    """
+    data = {}  # Dictionary to store the database content
+    env = lmdb.open(db_path, readonly = True, lock = False)  # Open the database in read-only mode
+    with env.begin(write = False) as txn:  # Begin a read transaction
+        cursor = txn.cursor()  # Use a cursor to iterate through the database
+        for key, value in cursor:  # Iterate over all key-value pairs
+            # Deserialize the value
+            deserialized_value = pickle.loads(value)
+            # Store the key-value pair in the dictionary (decode key to string for readability)
+            data[key.decode('ascii')] = deserialized_value
+    env.close()
+    return data

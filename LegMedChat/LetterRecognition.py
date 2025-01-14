@@ -202,6 +202,8 @@ class LetterRecognition(neural):
                 f"Val Accuracy: {val_accuracy:.4f}"
             )
             
+            torch.save(self.net.state_dict(), os.path.join(option.PathToLetterNet,f"net{epoch}.pt"))
+            
             # Reset metrics after each epoch
             self.accuracy_metric.reset()
             self.train_accuracy_metric.reset()

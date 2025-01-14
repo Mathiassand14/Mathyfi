@@ -1,4 +1,5 @@
 import os.path
+import random
 from glob import glob
 from typing import Tuple
 
@@ -12,6 +13,7 @@ from FileHandeling.imkml2img.inkml2img import inkml2img
 from neural import neural
 from Options.OptionsUser import OptionsUser as option
 from LegMedChat.LetterRecognition import LetterRecognition
+import torchvision.ops as ops
 
 class ImageBoundrybox(neural):
     def __init__\
@@ -59,24 +61,24 @@ class ImageBoundrybox(neural):
     def build_model(self) -> torch.nn.Sequential:
         """Defines and returns the model"""
         return torch.nn.Sequential(
-            torch.nn.Conv2d(1, 32, 3, padding = 1), # 400*50x32
-            torch.nn.Dropout(self.dropout_rate),
+            torch.nn.Conv2d(1, 32, 3, padding = 1), # 400*400x32
+            torch.nn.Dropout(0.1),
             torch.nn.BatchNorm2d(32),
             torch.nn.ReLU(),
             torch.nn.MaxPool2d(kernel_size = 2, stride = 2), # 200*25X32
-            torch.nn.Conv2d(32, 64, 3, padding = 1), # 200*25X64
-            torch.nn.Dropout(self.dropout_rate),
+            torch.nn.Conv2d(32, 64, 3, padding = 1), # 200*200X64
+            torch.nn.Dropout(0.2),
             torch.nn.BatchNorm2d(64),
             torch.nn.ReLU(),
             torch.nn.MaxPool2d(kernel_size = 2, stride = 2), # 100*12X64
-            torch.nn.Conv2d(64, 128, 3, padding = 1), # 100*12X128
-            torch.nn.Dropout(self.dropout_rate),
+            torch.nn.Conv2d(64, 128, 3, padding = 1), # 100*100X128
+            torch.nn.Dropout(0.3),
             torch.nn.BatchNorm2d(128),
             torch.nn.ReLU(),
-            torch.nn.MaxPool2d(kernel_size = 2, stride = 2), # 50*6X128
+            torch.nn.MaxPool2d(kernel_size = 2, stride = 2), # 50*50X128
             torch.nn.Flatten(),
-            torch.nn.Linear(128 * 50 * 6, 256),
-            torch.nn.Dropout(self.dropout_rate),
+            torch.nn.Linear(128 * 50 * 50, 256),
+            torch.nn.Dropout(0.5),
             torch.nn.BatchNorm1d(256),
             torch.nn.ReLU(),
             torch.nn.Linear(256, 4),
@@ -85,54 +87,49 @@ class ImageBoundrybox(neural):
     
     @staticmethod
     def data_loader(path: str) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Load data from path"""
-        files = glob(os.path.join(path, "*.inkml"))
-        print(files)
-        images = []
-        labels = []
-        for file in tqdm(files):
-            new_file = file.replace(".inkml", ".png")
-            inkml2img(file,new_file,size = (400,50))
-            image = img2array(new_file, size = (400,50))
-            os.remove(new_file)
-            images.append(image)
-            with open(file) as f:
-                label = f.read().split("\n")[5]
-                labels.append(label)
-        return torch.stack(images).float(), torch.tensor(labels)
+        pass
     
     
-    def forward(self, x):
-        x = self.net(x)
+    def forward(self, input, output_bb: bool = False) -> torch.Tensor | Tuple[torch.Tensor, torch.float, torch.float, torch.float, torch.float]:
+        x, y, w, h = self.net(input).items()
         
-        return x
+        img = ops.roi_align(input, [x, y, w, h], output_size = (45, 45))
+        
+        output = self.LetterRecognition.net(img)
+        
+        if output_bb:
+            return output, x, y, w, h
+        return output
     
-if __name__ == "__main__":
-    model = ImageBoundrybox.data_loader(os.path.join(option.PathToMathWriting, "train"))
-    
-else:
-    #%%
-    from FileHandeling.Lmdb import create_lmdb
-    from Options.OptionsUser import OptionsUser as option
-    import os
-    from glob import glob
-    from tqdm import tqdm
-    from FileHandeling.img2array import img2array
-    from FileHandeling.imkml2img.inkml2img import inkml2img
-    
-    if not os.path.exists(option.PathToMathWritingLmdbTrain):
-        files = glob(os.path.join(option.PathToMathWriting, "train", "*.inkml"))
-        print(files)
-        data = {}
-        for file in tqdm(files):
-            new_file = file.replace(".inkml", ".png")
-            inkml2img(file,new_file,size = (400,50))
-            image = img2array(new_file, size = (400,50))
-            os.remove(new_file)
+    def train(self) -> None:
+        """Trains the model"""
+        
+        
+        self.LetterRecognition.load(os.path.join(option.PathToLetterModel, "model.pth"))
+        for epoch in range(self.num_epochs):
+            running_loss = 0.0
+            correct = 0
+            total = 0
             
-            with open(file) as f:
-                label = f.read().split("\n")[5].removeprefix('<annotation type="normalizedLabel">').removesuffix('</annotation>')
-                #print(file.split("\\")[-1].replace(".inkml", ""), label)
-                data[file.split("\\")[-1].replace(".inkml", "")] = (label, image)
-        
-        create_lmdb(option.PathToMathWritingLmdbTrain, data)
+            for images, labels in tqdm(self.train_loader):
+                images, labels = images.to(self.device), labels.to(self.device)
+                
+                self.optimizer_l.zero_grad()
+                self.optimizer_bb.zero_grad()
+                
+                outputs = self.forward(images)
+                loss = self.loss_function(outputs, labels)
+                loss.backward()
+                self.optimizer_l.step()
+                self.optimizer_bb.step()
+                
+                running_loss += loss.item()
+                _, predicted = torch.max(outputs, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+                
+                self.train_accuracy_metric.update(predicted, labels)
+            
+            print(f"Epoch {epoch + 1}, Loss: {running_loss / len(self.train_loader)}, Accuracy: {100 * correct / total}")
+            self.train_accuracy_metric.compute()
+
