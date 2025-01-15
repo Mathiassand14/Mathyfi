@@ -7,6 +7,8 @@ class OptionsUser(Option):
     
     
     
+    
+    
     @cpu.class_property
     def PathToMathWriting(cls) -> str:
         return r"A:\Documents\mathwriting-2024"
@@ -38,6 +40,10 @@ class OptionsUser(Option):
     @cpu.class_property
     def PathToTextLmdb(cls) -> str:
         return r"A:\Documents\Mathyfi\TextLmdb"
+    
+    @cpu.class_property
+    def PathToLatexLmdb(cls) -> str:
+        return r"A:\Documents\Mathyfi\LatexLmdb"
     
     @cpu.class_property
     def PathToText(cls) -> str:

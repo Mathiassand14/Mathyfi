@@ -5,6 +5,9 @@ import pickle
 import cv2
 import os
 
+from tqdm import tqdm
+
+
 def create_lmdb(db_path, data):
     """
     Create an LMDB database and store key-value pairs provided in a dictionary.
@@ -27,7 +30,7 @@ def create_lmdb(db_path, data):
     
     with env.begin(write = True) as txn:
         # Loop through the dictionary and insert key-value pairs
-        for key, value in data.items():
+        for key, value in tqdm(data.items()):
             # Serialize the value
             serialized_value = pickle.dumps(value, protocol = pickle.HIGHEST_PROTOCOL)
             # Encode key as bytes (LMDB requires keys to be bytes)
@@ -79,7 +82,7 @@ def read_entire_lmdb(db_path):
     env = lmdb.open(db_path, readonly = True, lock = False)  # Open the database in read-only mode
     with env.begin(write = False) as txn:  # Begin a read transaction
         cursor = txn.cursor()  # Use a cursor to iterate through the database
-        for key, value in cursor:  # Iterate over all key-value pairs
+        for key, value in tqdm(cursor):  # Iterate over all key-value pairs
             # Deserialize the value
             deserialized_value = pickle.loads(value)
             # Store the key-value pair in the dictionary (decode key to string for readability)

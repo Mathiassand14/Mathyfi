@@ -48,3 +48,8 @@ class Option(ABC):
     @abstractmethod
     def PathToText(cls) -> str:
         pass
+    
+    @cpu.class_property
+    @abstractmethod
+    def PathToLatexLmdb(cls) -> str:
+        pass
