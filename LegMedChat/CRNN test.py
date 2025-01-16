@@ -150,7 +150,7 @@ class CRNN(torch.nn.Module):
         return total_distance / total_words if total_words > 0 else 0
     
     
-    @staticmethod
+    
     @staticmethod
     def ctc_decode(preds, symbols, blank_token=0):
         """
@@ -560,6 +560,13 @@ if __name__ == "__main__":
     # Initialize the model
     model = CRNN()
     model.load_state_dict(torch.load(os.path.join(option.PathToLetterNet, f"netCRNN14.pt")))
+    total_params = sum(p.numel() for p in model.parameters())
+
+    # Total number of trainable parameters
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
+    print(f"Total parameters: {total_params}")
+    print(f"Trainable parameters: {trainable_params}")
     
     model.test()
     #model.device = "cpu"
