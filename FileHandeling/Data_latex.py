@@ -34,7 +34,7 @@ def make_latex_lmdb(type: str, folders: List[str]):
     
     create_lmdb(os.path.join(option.PathToLatexLmdb, type), data)
 if __name__ == "__main__":
-    make_latex_lmdb("train.lmdb", ["train", "synthetic"])
+    make_latex_lmdb("train.lmdb", ["train"])
     #make_latex_lmdb("test.lmdb", ["test"])
     #make_latex_lmdb("validation.lmdb", ["valid"])
 
