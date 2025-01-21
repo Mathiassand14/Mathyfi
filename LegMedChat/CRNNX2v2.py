@@ -7,21 +7,63 @@ import torch
 import torchmetrics
 from matplotlib import pyplot as plt
 from sympy import factor
+from torch.nn.functional import dropout
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
 import FileHandeling.Lmdb
+from FileHandeling.img2array import img2array
 
 from Options.OptionsUser import OptionsUser as option
+
+class LmdbDataset(Dataset):
+    def __init__(self, path: str, num_classes: int):
+        """Initialize the dataset and load LMDB keys."""
+        self.symbols = r" !#%&()*+-.,/0123456789:;=?ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_abcdefghijklmnopqrstuvwxyz{|}<>\""
+        
+        self.symbols_dict = {}
+        for i, symbol in enumerate(self.symbols):
+            self.symbols_dict[symbol] = i
+        
+        self.data = FileHandeling.Lmdb.read_entire_lmdb(path)
+        self.keys = list(self.data.keys())
+        self.num_classes = num_classes
+    
+    def __len__(self):
+        """Return the total number of items in the dataset."""
+        return len(self.keys)
+    
+    def get_index(self, string: str) -> List[int]:
+        """Get the index of a character in the alphabet."""
+        
+        
+        
+        indexes = []
+        for i in string:
+            
+            indexes.append(self.symbols_dict[i])
+        
+        return indexes
+    
+    def __getitem__(self, index):
+        """Get an item at the specified index."""
+        key = self.keys[index]
+        value = self.data[key]
+        latex = value[0].replace(r'<annotation type="normalizedLabel">', "")
+        image = torch.tensor(value[1]).float()
+        label = torch.tensor(self.get_index(latex))
+        return image, label, key
+
+
 
 
 class CRNN(torch.nn.Module):
     def __init__\
         (
             self,
-            batch_size: int = 220,
+            batch_size: int = 130,
             num_epochs: int = 1000,
-            learning_rate: float = 0.0001,
+            learning_rate: float = 0.001,
             gpu: bool = None
         ) -> None:
         super().__init__()
@@ -37,9 +79,9 @@ class CRNN(torch.nn.Module):
         self.num_epochs = num_epochs
         self.learning_rate = learning_rate
         self.num_classes = self.num_classes = len(self.symbols)
-        self.train_path = os.path.join(option.PathToLatexLmdb, "train.lmdb") #"validation.lmdb")#
-        self.test_path = os.path.join(option.PathToLatexLmdb, "test.lmdb")
-        self.validation_path = os.path.join(option.PathToLatexLmdb, "validation.lmdb") # "test.lmdb")#
+        self.train_path = os.path.join(option.PathToLatexLmdb, "trainx2.lmdb") #"validation.lmdb")#
+        self.test_path = os.path.join(option.PathToLatexLmdb, "testx2.lmdb")
+        self.validation_path = os.path.join(option.PathToLatexLmdb, "validationx2.lmdb") # "test.lmdb")#
         
         # Device setup
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if gpu is None else "cuda" if gpu else "cpu"
@@ -57,17 +99,25 @@ class CRNN(torch.nn.Module):
         
         
         self.conv = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 16, 3, padding=1), # 500*50X1
+            torch.nn.BatchNorm2d(16),
+            torch.nn.ReLU(),
+            # Potentially add a light dropout here if you want, e.g.:
+            torch.nn.Dropout(p=0.1),
+            torch.nn.MaxPool2d(kernel_size=2, stride=2),
+            
+            
             # --- Block 1 ---
-            torch.nn.Conv2d(1, 64, 3, padding=1), # 500*50X1
-            #torch.nn.BatchNorm2d(64),
+            torch.nn.Conv2d(16, 32, 3, padding=1), # 500*50X1
+            #torch.nn.BatchNorm2d(32),
             torch.nn.ReLU(),
             # Potentially add a light dropout here if you want, e.g.:
             torch.nn.Dropout(p=0.1),
             torch.nn.MaxPool2d(kernel_size=2, stride=2),
             
             # --- Block 2 ---
-            torch.nn.Conv2d(64, 128, 3, padding=1), #250*25X32
-            #torch.nn.BatchNorm2d(128),
+            torch.nn.Conv2d(32, 64, 3, padding=1), #250*25X32
+            #torch.nn.BatchNorm2d(64),
             torch.nn.ReLU(),
             
             # Light dropout for second block
@@ -75,19 +125,19 @@ class CRNN(torch.nn.Module):
             torch.nn.MaxPool2d(kernel_size=2, stride=2),
             
             # --- Block 3 ---
-            torch.nn.Conv2d(128, 256, 3, padding=1), # 125*12X64
-            #torch.nn.BatchNorm2d(256),
+            torch.nn.Conv2d(64, 128, 3, padding=1), # 125*12X64
+            #torch.nn.BatchNorm2d(128),
             torch.nn.ReLU(),
             # Light dropout for third block
             torch.nn.Dropout(p=0.2),
             torch.nn.MaxPool2d(kernel_size=2, stride=2),
         )
-    
-        self.Lstm = torch.nn.LSTM(256, 512, 2, batch_first=True, bidirectional=True, dropout = 0.3) # 64*6X128
-    
+        
+        self.Lstm = torch.nn.LSTM(128, 384, 2, batch_first=True, bidirectional=True, dropout = 0.3) # 64*6X128
+        
         self.fc = torch.nn.Sequential(
             
-            torch.nn.Linear(1024, self.num_classes + 1),
+            torch.nn.Linear(768, self.num_classes + 1),
             #torch.nn.BatchNorm1d(512),
             #torch.nn.ReLU(),
             ## Heavier dropout on fully-connected layer
@@ -95,13 +145,14 @@ class CRNN(torch.nn.Module):
             #
             #torch.nn.Linear(512, self.num_classes + 1),
         )
-        
-        
-        
-        # Model, Loss, and Optimizer
+
+
+
+
+# Model, Loss, and Optimizer
         self.criterion = torch.nn.CTCLoss(blank = self.num_classes, zero_infinity = True, reduction = "mean")
         self.optimizer = torch.optim.Adam(self.parameters(), lr = self.learning_rate, weight_decay = 1e-4)
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode = "min", factor = 0.1, patience = 4, verbose = True)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode = "min", factor = 0.1, patience = 4)
         
         self.to(self.device)
     
@@ -111,6 +162,7 @@ class CRNN(torch.nn.Module):
     
     def forward(self, x):
         #print(f"Input to CNN: {x.shape}")
+        
         x = x.unsqueeze(1)
         x = self.conv(x) # Shape: (batch_size, 128, 62, 6)
         b, c, h, w = x.size()
@@ -127,6 +179,8 @@ class CRNN(torch.nn.Module):
         x = x.reshape(b * seq_len, hidden_dim)
         
         # Fully connected: (b*372, num_classes + 1)
+        
+        
         x = self.fc(x)
         
         # Reshape back to 3D: (b, 372, num_classes + 1)
@@ -208,17 +262,24 @@ class CRNN(torch.nn.Module):
             return self.image_tensors[idx], self.label_tensors[idx]
     
     
-    def data_loader(self, path: str) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Loads images and their labels from a csv file."""
-        images, labels = [], []
-        data = FileHandeling.Lmdb.read_entire_lmdb(path)
-        for key, value in tqdm(data.items()):
-            latex = value[0].replace(r'<annotation type="normalizedLabel">',"")
-            images.append(torch.tensor(value[1]))
-            labels.append(torch.tensor(self.get_index(latex)))
-            #print(latex)
-        pad_labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value = self.num_classes)
-        return torch.stack(images).float(), pad_labels
+
+    
+    def collate_fn(self, batch):
+        """Custom collate function to handle padding of labels."""
+        images, labels, keys = zip(*batch)
+        pad_labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first = True, padding_value = self.num_classes)
+        return torch.stack(images), pad_labels, keys
+    
+    def data_loader(self, path: str):
+        """Prepare the data loader for the given path."""
+        dataset = LmdbDataset(path, self.num_classes)
+        data_loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size = self.batch_size,
+            shuffle = True,
+            collate_fn = self.collate_fn,  # Custom collate_fn for batching padded labels
+        )
+        return data_loader
     
     def compute_cer(self, decoded_preds: List[str], decoded_targets: List[str]) -> float:
         """
@@ -244,147 +305,13 @@ class CRNN(torch.nn.Module):
         
     
     
-    #def ttraining(self):
-    #    """Train the CNN model with the training dataset."""
-    #    # Load training and validation data
-    #    train_images, train_labels = self.data_loader(self.train_path)
-    #    train_dataset = self.CustomDataset(train_images, train_labels)
-    #    train_loader = torch.utils.data.DataLoader(
-    #        train_dataset,
-    #        batch_size=self.batch_size,
-    #        shuffle=True,
-    #    )
-    #
-    #    val_images, val_labels = self.data_loader(self.validation_path)
-    #    val_dataset = self.CustomDataset(val_images, val_labels)
-    #    val_loader = torch.utils.data.DataLoader(
-    #        val_dataset,  # It was incorrectly loading train_dataset earlier
-    #        batch_size=self.batch_size,
-    #        shuffle=True,
-    #    )
-    #
-    #    # Prepare accuracy log
-    #    #with open("accuracy_2.csv", "w") as acc:
-    #    #    acc.write("epoch,val_accuracy,train_accuracy,loss\n")
-    #
-    #    # Training loop
-    #    for epoch in tqdm(range(self.num_epochs), desc="Training"):
-    #
-    #        epoch_loss, train_accuracy = 0, 0
-    #        #self.accuracy_metric.reset()
-    #
-    #        # Validation phase
-    #        #self.eval()
-    #        #val_accuracy_total = 0
-    #        #with torch.no_grad():
-    #        #    for x_val, y_val in tqdm(val_loader):
-    #        #        x_val = x_val.to(self.device)
-    #        #        y_val = y_val.to(self.device)
-    #        #        outputs = self.forward(x_val)  # (T, N, C)
-    #        #
-    #        #        # 1. Define input_lengths (assuming all sequences have the same length T)
-    #        #        T = outputs.size(0)  # Time steps
-    #        #        N = outputs.size(1)  # Batch size
-    #        #        input_lengths = torch.full(
-    #        #            size=(N,), fill_value=T, dtype=torch.long, device=self.device
-    #        #        )
-    #        #
-    #        #        # 2. Define target_lengths
-    #        #        target_lengths = (y_val != self.num_classes).sum(dim=1).to(torch.long)
-    #        #
-    #        #        # 3. Compute CTC loss
-    #        #        loss = self.criterion(outputs, y_val, input_lengths, target_lengths)
-    #        #
-    #        #        # Optionally, compute accuracy
-    #        #        decoded_preds = self.ctc_decode(outputs, self.symbols, blank_token=self.num_classes)
-    #        #        decoded_targets = []
-    #        #        for label in y_val:
-    #        #            chars = [self.symbols[i.item()] for i in label if i.item() != self.num_classes]
-    #        #            decoded_targets.append(chars)
-    #        #        val_accuracy_total += self.compute_levenshtein_distance(decoded_preds, decoded_targets)
-    #        #
-    #        #val_accuracy = val_accuracy_total / len(val_loader)
-    #        val_accuracy = 0
-    #        total_loss = 0
-    #        # Training phase
-    #        self.train()
-    #        train_accuracy_total = 0
-    #        for x_batch, y_batch in tqdm(train_loader):
-    #            x_batch = x_batch.to(self.device)
-    #            y_batch = y_batch.to(self.device)
-    #
-    #            # Forward pass, loss, backward pass
-    #            outputs = self.forward(x_batch)  # (T, N, C)
-    #
-    #            # 1. Define input_lengths
-    #            T = outputs.size(0)
-    #            N = outputs.size(1)
-    #            input_lengths = torch.full(
-    #                size=(N,), fill_value=T, dtype=torch.long, device=self.device
-    #            )
-    #
-    #            # 2. Define target_lengths
-    #            target_lengths = (y_batch != self.num_classes).sum(dim=1).to(torch.long)
-    #
-    #            # 3. Compute CTC loss
-    #            loss = self.criterion(outputs, y_batch, input_lengths, target_lengths)
-    #            epoch_loss += loss.item()
-    #
-    #            self.optimizer.zero_grad()
-    #            loss.backward()
-    #            self.optimizer.step()
-    #            total_loss += loss.item()
-    #
-    #            # Optionally, compute accuracy
-    #            decoded_preds = self.ctc_decode(outputs, self.symbols, blank_token=self.num_classes)
-    #            decoded_targets = []
-    #            for label in y_batch:
-    #                chars = [self.symbols[i.item()] for i in label if i.item() != self.num_classes]
-    #                decoded_targets.append(chars)
-    #            train_accuracy_total += self.compute_levenshtein_distance(decoded_preds, decoded_targets)
-    #
-    #        avg_loss = total_loss / len(train_loader)
-    #        train_accuracy = train_accuracy_total / len(train_loader)
-    #
-    #        # Write epoch metrics
-    #        with open("accuracy_2.csv", "a") as acc:
-    #            acc.write(f"{epoch + 48},{val_accuracy},{train_accuracy},{avg_loss}\n")
-    #
-    #        print(
-    #            f"Epoch {epoch + 1 + 48}/{self.num_epochs}, "
-    #            f"Train Accuracy: {train_accuracy:.4f}, "
-    #            f"Val Accuracy: {val_accuracy:.4f}, "
-    #            f"Loss: {avg_loss:.4f}"
-    #        )
-    #
-    #        torch.save(self.state_dict(), os.path.join(option.PathToLetterNet, f"netCRNN{epoch}.pt"))
-    #
-    #        # Reset metrics after each epoch
-    #        self.accuracy_metric.reset()
-    #        self.train_accuracy_metric.reset()
-    #
-    #        df = pd.read_csv("accuracy_2.csv")
-    #        df.plot(x="epoch", y="loss")
-    #        plt.show()
+    
     
     def ttraining(self,epok = 0):
         """Train the CNN model with the training dataset."""
         # Load training and validation data
-        train_images, train_labels = self.data_loader(self.train_path)
-        train_dataset = self.CustomDataset(train_images, train_labels)
-        train_loader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=self.batch_size,
-            shuffle=True,
-        )
-        
-        val_images, val_labels = self.data_loader(self.validation_path)
-        val_dataset = self.CustomDataset(val_images, val_labels)
-        val_loader = torch.utils.data.DataLoader(
-            val_dataset,
-            batch_size=self.batch_size,
-            shuffle=True,
-        )
+        train_loader = self.data_loader(self.train_path)
+        val_loader = self.data_loader(self.validation_path)
         
         # Training loop
         for epoch in tqdm(range(self.num_epochs), desc="Training"):
@@ -395,7 +322,7 @@ class CRNN(torch.nn.Module):
             
             # Training phase
             self.train()
-            for x_batch, y_batch in tqdm(train_loader):
+            for x_batch, y_batch, _ in tqdm(train_loader):
                 x_batch = x_batch.to(self.device)
                 y_batch = y_batch.to(self.device)
                 
@@ -434,12 +361,13 @@ class CRNN(torch.nn.Module):
             
             avg_train_loss = total_loss / len(train_loader)
             avg_train_cer = total_train_cer / len(train_loader)
+            self.scheduler.step(avg_train_loss)
             
             # Validation phase
             total_val_loss = 0
             self.eval()
             with torch.no_grad():
-                for x_val, y_val in tqdm(val_loader):
+                for x_val, y_val, _ in tqdm(val_loader):
                     x_val = x_val.to(self.device)
                     y_val = y_val.to(self.device)
                     
@@ -467,13 +395,13 @@ class CRNN(torch.nn.Module):
                     total_val_loss += loss
             
             val_loss = total_val_loss / len(val_loader)
-            self.scheduler.step(val_loss)
+            
             
             
             avg_val_cer = total_val_cer / len(val_loader)
             
             # Log metrics
-            with open("accuracy_3.csv", "a") as acc:
+            with open("accuracy_x2v2.csv", "a") as acc:
                 acc.write(f"{epoch + epok},{avg_val_cer},{avg_train_cer},{avg_train_loss},{val_loss}\n")
             
             print(
@@ -483,58 +411,65 @@ class CRNN(torch.nn.Module):
                 f"Loss: {avg_train_loss:.4f}"
             )
             
-            torch.save(self.state_dict(), os.path.join(option.PathToLetterNet, f"netCRNN2{epoch + epok}.pt"))
+            torch.save(self.state_dict(), os.path.join(option.PathToLetterNet, f"netCRNNX2v2_{epoch + epok}.pt"))
             
             # Reset metrics after each  epoch
             self.accuracy_metric.reset()
             self.train_accuracy_metric.reset()
             
             # Plot loss
-            df = pd.read_csv("accuracy_3.csv")
+            df = pd.read_csv("accuracy_x2v2.csv")
             df.plot(x="epoch", y=["loss","val_loss","val_accuracy","train_accuracy"])
             plt.show()
     
     def test(self):
         """Test the CNN model on the test dataset."""
-        test_images, test_labels = self.data_loader(self.test_path)
-        test_loader = torch.utils.data.DataLoader(
-            self.CustomDataset(test_images, test_labels),
-            batch_size=self.batch_size,
-            shuffle=False,
-        )
+        val_loader = self.data_loader(self.test_path)
         
-        # Reset metric and evaluate the model
-        self.eval()  # Correctly reference the model instance
-        self.accuracy_metric.reset()
         
-        total_test_cer = 0  # Initialize CER metric
         
+        total_loss, total_cer, total_corect = 0, 0, 0
+        self.eval()
         with torch.no_grad():
-            for x_batch, y_batch in tqdm(test_loader):
-                x_batch = x_batch.to(self.device)
-                y_batch = y_batch.to(self.device)
-                outputs = self.forward(x_batch)
-                outputs = torch.nn.functional.log_softmax(outputs,dim = 2)
+            for x_val, y_val, key in tqdm(val_loader):
+                x_val = x_val.to(self.device)
+                y_val = y_val.to(self.device)
+                
+                outputs = self.forward(x_val)  # (T, N, C)
+                
                 # Define input_lengths
                 T, N = outputs.size(0), outputs.size(1)
                 input_lengths = torch.full((N,), fill_value=T, dtype=torch.long, device=self.device)
                 
                 # Define target_lengths
-                target_lengths = (y_batch != self.num_classes).sum(dim=1).to(torch.long)
+                target_lengths = (y_val != self.num_classes).sum(dim=1).to(torch.long)
+                
+                # Compute CTC loss
+                loss = self.criterion(outputs, y_val, input_lengths, target_lengths)
                 
                 # Decode predictions
                 decoded_preds = self.ctc_decode(outputs, self.symbols, blank_token=self.num_classes)
                 decoded_targets = []
-                for label in y_batch:
+                for label in y_val:
                     chars = [self.symbols[i.item()] for i in label if i.item() != self.num_classes]
                     decoded_targets.append("".join(chars))
+                [print(f"{i == j} pred: {i}, target: {j}", {t}) for i, j, t in zip(decoded_preds, decoded_targets, key)]
+                total_corect += sum([1 for i, j in zip(decoded_preds, decoded_targets) if i == j])
                 
                 # Compute CER
-                total_test_cer += self.compute_cer(decoded_preds, decoded_targets)
+                
+                total_cer += self.compute_cer(decoded_preds, decoded_targets)
+                total_loss += loss
         
-        avg_test_cer = total_test_cer / len(test_loader)
-        print(f"Test CER: {avg_test_cer:.4f}")
+        val_loss = total_loss / len(val_loader)
         
+        
+        
+        avg_val_cer = total_cer / len(val_loader)
+        
+        corect_percent = total_corect / val_loader.dataset.__len__()
+        
+        print(f"Test CER: {avg_val_cer:.4f}, Loss: {val_loss:.4f}, Correct: {corect_percent:.4f}")
     
     
     #def eval(self, input_data: torch.Tensor) -> int:
@@ -570,10 +505,38 @@ class CRNN(torch.nn.Module):
         #
         #return predicted_label
 
+    def run(self,img):
+        
+        # Ensure the model is in evaluation
+        img = img2array(img, (800, 100))
+        img = torch.tensor(img).float()
+        
+        self.eval()
+        # If img lacks a batch dimension, add it
+        # Add batch and channel dimensions
+        if img.ndim == 2:
+            img = img.unsqueeze(0)  # (H, W) -> (1, 1, H, W)
+        elif img.ndim == 3:
+            img = img # (C, H, W) -> (1, C, H, W)
+        elif img.ndim == 4:
+            img = img.squeeze(1)  # Remove extra dimension if already in 5D
+        
+        # Transfer input to the appropriate device
+        img = img.to(self.device)
+        # Forward pass through the model
+        with torch.no_grad():
+            outputs = self.forward(img)
+        # Get the predicted class (highest probability)
+        
+        
+        decode_pred = self.ctc_decode(outputs, self.symbols, blank_token=self.num_classes)
+        return decode_pred[0]
+        
+    
 if __name__ == "__main__":
     # Initialize the model
-    model = CRNN()
-    model.load_state_dict(torch.load(os.path.join(option.PathToLetterNet, f"netCRNN211.pt")))
+    model = CRNN(gpu = False)
+    model.load_state_dict(torch.load(os.path.join(option.PathToLetterNet, f"netCRNNX2v2_6.pt")))
     total_params = sum(p.numel() for p in model.parameters())
 
     # Total number of trainable parameters
@@ -582,9 +545,10 @@ if __name__ == "__main__":
     print(f"Total parameters: {total_params}")
     print(f"Trainable parameters: {trainable_params}")
     
-    #model.test()
+    model.test()
     #model.device = "cpu"
     # Train the model
-    model.ttraining(12)
+    #print(model.run(r"A:\Overførsler\download (1).jpg"))
+    #model.ttraining()
     
     

@@ -22,9 +22,9 @@ def make_latex_lmdb(type: str, folders: List[str]):
     data = {}
     for file in tqdm(files):
         new_file = file.replace(".inkml", ".png")
-        inkml2img(file,new_file,size = (400,50))
-        image = img2array(new_file, size = (400,50))
-        os.remove(new_file)
+        inkml2img(file,new_file,size = (800,100))
+        image = img2array(new_file, size = (800,100))
+        #os.remove(new_file)
         
         with open(file) as f:
             label = f.read().split("\n")[5].removeprefix('<annotation type="normalizedLabel">').removesuffix(
@@ -34,9 +34,9 @@ def make_latex_lmdb(type: str, folders: List[str]):
     
     create_lmdb(os.path.join(option.PathToLatexLmdb, type), data)
 if __name__ == "__main__":
-    make_latex_lmdb("train.lmdb", ["train"])
-    #make_latex_lmdb("test.lmdb", ["test"])
-    #make_latex_lmdb("validation.lmdb", ["valid"])
+    #make_latex_lmdb("trainx2.lmdb", ["train"])
+    make_latex_lmdb("testx2.lmdb", ["test"])
+    #make_latex_lmdb("validationx2.lmdb", ["valid"])
 
 
 
