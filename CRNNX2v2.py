@@ -7,10 +7,12 @@ import torch
 import torchmetrics
 from matplotlib import pyplot as plt
 from sympy import factor
+from torch.nn.functional import dropout
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
 import FileHandeling.Lmdb
+from FileHandeling.img2array import img2array
 
 from Options.OptionsUser import OptionsUser as option
 
@@ -50,7 +52,7 @@ class LmdbDataset(Dataset):
         latex = value[0].replace(r'<annotation type="normalizedLabel">', "")
         image = torch.tensor(value[1]).float()
         label = torch.tensor(self.get_index(latex))
-        return image, label
+        return image, label, key
 
 
 
@@ -61,7 +63,7 @@ class CRNN(torch.nn.Module):
             self,
             batch_size: int = 130,
             num_epochs: int = 1000,
-            learning_rate: float = 0.0001,
+            learning_rate: float = 0.001,
             gpu: bool = None
         ) -> None:
         super().__init__()
@@ -100,53 +102,53 @@ class CRNN(torch.nn.Module):
             torch.nn.Conv2d(1, 16, 3, padding=1), # 500*50X1
             torch.nn.BatchNorm2d(16),
             torch.nn.ReLU(),
-            # Potentially add a light dropout here if you want, e.g.:
+            
             torch.nn.Dropout(p=0.1),
             torch.nn.MaxPool2d(kernel_size=2, stride=2),
             
             
             # --- Block 1 ---
             torch.nn.Conv2d(16, 32, 3, padding=1), # 500*50X1
-            torch.nn.BatchNorm2d(32),
+            #torch.nn.BatchNorm2d(32),
             torch.nn.ReLU(),
-            # Potentially add a light dropout here if you want, e.g.:
+            
             torch.nn.Dropout(p=0.1),
             torch.nn.MaxPool2d(kernel_size=2, stride=2),
             
             # --- Block 2 ---
             torch.nn.Conv2d(32, 64, 3, padding=1), #250*25X32
-            torch.nn.BatchNorm2d(64),
+            #torch.nn.BatchNorm2d(64),
             torch.nn.ReLU(),
             
-            # Light dropout for second block
             torch.nn.Dropout(p=0.1),
             torch.nn.MaxPool2d(kernel_size=2, stride=2),
             
             # --- Block 3 ---
             torch.nn.Conv2d(64, 128, 3, padding=1), # 125*12X64
-            torch.nn.BatchNorm2d(128),
+            #torch.nn.BatchNorm2d(128),
             torch.nn.ReLU(),
-            # Light dropout for third block
+
             torch.nn.Dropout(p=0.2),
             torch.nn.MaxPool2d(kernel_size=2, stride=2),
         )
-    
+        
         self.Lstm = torch.nn.LSTM(128, 384, 2, batch_first=True, bidirectional=True, dropout = 0.3) # 64*6X128
-    
+        
         self.fc = torch.nn.Sequential(
             
             torch.nn.Linear(768, self.num_classes + 1),
             #torch.nn.BatchNorm1d(512),
             #torch.nn.ReLU(),
-            ## Heavier dropout on fully-connected layer
+            
             #torch.nn.Dropout(p=0.4),
             #
             #torch.nn.Linear(512, self.num_classes + 1),
         )
-        
-        
-        
-        # Model, Loss, and Optimizer
+
+
+
+
+# Model, Loss, and Optimizer
         self.criterion = torch.nn.CTCLoss(blank = self.num_classes, zero_infinity = True, reduction = "mean")
         self.optimizer = torch.optim.Adam(self.parameters(), lr = self.learning_rate, weight_decay = 1e-4)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode = "min", factor = 0.1, patience = 4)
@@ -159,23 +161,31 @@ class CRNN(torch.nn.Module):
     
     def forward(self, x):
         #print(f"Input to CNN: {x.shape}")
+        
         x = x.unsqueeze(1)
+        #print(f"Input to CNN: {x.shape}")
         x = self.conv(x) # Shape: (batch_size, 128, 62, 6)
+       
         b, c, h, w = x.size()
         
-        #print(f"Input to CNN: {x.shape}")
+        #print(f"befor permute: {x.shape}")
         x = x.permute(0, 2, 3, 1)  # Shape: (batch_size, 62, 6, 128)
+        #print(f"after permute: {x.shape}")
         #print(f"Input to CNN: {x.shape}")
         x = x.reshape(b, h * w, c)  # Shape: (batch_size, 372, 128)
-        
+        #print(f"after reshape: {x.shape}")
         #print(f"Input to CNN: {x.shape}")
         x, _ = self.Lstm(x)  # Shape: (batch_size, 372, 512)
+        #print(f"after lstm: {x.shape}")
         b, seq_len, hidden_dim = x.shape
         
         x = x.reshape(b * seq_len, hidden_dim)
-        
+        #print(f"after reshape: {x.shape}")
         # Fully connected: (b*372, num_classes + 1)
+        
+        
         x = self.fc(x)
+        #print(f"after fc: {x.shape}")
         
         # Reshape back to 3D: (b, 372, num_classes + 1)
         x = x.reshape(b, seq_len, self.num_classes + 1)
@@ -205,7 +215,6 @@ class CRNN(torch.nn.Module):
     def ctc_decode(preds, symbols, blank_token=0):
         """
         Decodes CTC output by removing consecutive duplicate characters and blank tokens.
-        
         Args:
             preds (torch.Tensor): The model's output logits of shape (T, batch_size, num_classes).
             symbols (str): The dictionary mapping indices to characters.
@@ -260,9 +269,9 @@ class CRNN(torch.nn.Module):
     
     def collate_fn(self, batch):
         """Custom collate function to handle padding of labels."""
-        images, labels = zip(*batch)
+        images, labels, keys = zip(*batch)
         pad_labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first = True, padding_value = self.num_classes)
-        return torch.stack(images), pad_labels
+        return torch.stack(images), pad_labels, keys
     
     def data_loader(self, path: str):
         """Prepare the data loader for the given path."""
@@ -316,7 +325,7 @@ class CRNN(torch.nn.Module):
             
             # Training phase
             self.train()
-            for x_batch, y_batch in tqdm(train_loader):
+            for x_batch, y_batch, _ in tqdm(train_loader):
                 x_batch = x_batch.to(self.device)
                 y_batch = y_batch.to(self.device)
                 
@@ -361,7 +370,7 @@ class CRNN(torch.nn.Module):
             total_val_loss = 0
             self.eval()
             with torch.no_grad():
-                for x_val, y_val in tqdm(val_loader):
+                for x_val, y_val, _ in tqdm(val_loader):
                     x_val = x_val.to(self.device)
                     y_val = y_val.to(self.device)
                     
@@ -395,7 +404,7 @@ class CRNN(torch.nn.Module):
             avg_val_cer = total_val_cer / len(val_loader)
             
             # Log metrics
-            with open("accuracy_x2.csv", "a") as acc:
+            with open("accuracy_x2v2.csv", "a") as acc:
                 acc.write(f"{epoch + epok},{avg_val_cer},{avg_train_cer},{avg_train_loss},{val_loss}\n")
             
             print(
@@ -405,14 +414,14 @@ class CRNN(torch.nn.Module):
                 f"Loss: {avg_train_loss:.4f}"
             )
             
-            torch.save(self.state_dict(), os.path.join(option.PathToLetterNet, f"netCRNNX2_{epoch + epok}.pt"))
+            torch.save(self.state_dict(), os.path.join(option.PathToLetterNet, f"netCRNNX2v2_{epoch + epok}.pt"))
             
             # Reset metrics after each  epoch
             self.accuracy_metric.reset()
             self.train_accuracy_metric.reset()
             
             # Plot loss
-            df = pd.read_csv("accuracy_x2.csv")
+            df = pd.read_csv("accuracy_x2v2.csv")
             df.plot(x="epoch", y=["loss","val_loss","val_accuracy","train_accuracy"])
             plt.show()
     
@@ -422,10 +431,10 @@ class CRNN(torch.nn.Module):
         
         
         
-        total_loss, total_cer, total_corect = 0, 0, 0
+        total_loss, total_cer, total_corect, total_wrong, total_len = 0, 0, 0, 0, 0
         self.eval()
         with torch.no_grad():
-            for x_val, y_val in tqdm(val_loader):
+            for x_val, y_val, key in tqdm(val_loader):
                 x_val = x_val.to(self.device)
                 y_val = y_val.to(self.device)
                 
@@ -447,12 +456,16 @@ class CRNN(torch.nn.Module):
                 for label in y_val:
                     chars = [self.symbols[i.item()] for i in label if i.item() != self.num_classes]
                     decoded_targets.append("".join(chars))
-                
+                [print(f"{i == j} pred: {i}, target: {j}", {t}) for i, j, t in zip(decoded_preds, decoded_targets, key)]
                 total_corect += sum([1 for i, j in zip(decoded_preds, decoded_targets) if i == j])
                 
                 # Compute CER
                 
                 total_cer += self.compute_cer(decoded_preds, decoded_targets)
+                
+                leen = sum(len(i) for i in decoded_targets)
+                total_len += leen
+                total_wrong += self.compute_cer(decoded_preds, decoded_targets) * leen
                 total_loss += loss
         
         val_loss = total_loss / len(val_loader)
@@ -461,9 +474,10 @@ class CRNN(torch.nn.Module):
         
         avg_val_cer = total_cer / len(val_loader)
         
-        corect_percent = total_corect / len(val_loader)
+        corect_percent = total_corect / val_loader.dataset.__len__()
         
         print(f"Test CER: {avg_val_cer:.4f}, Loss: {val_loss:.4f}, Correct: {corect_percent:.4f}")
+        print(f"total_letters: {total_len}, total_wrong: {total_wrong}")
     
     
     #def eval(self, input_data: torch.Tensor) -> int:
@@ -499,10 +513,38 @@ class CRNN(torch.nn.Module):
         #
         #return predicted_label
 
+    def run(self,img):
+        
+        # Ensure the model is in evaluation
+        img = img2array(img, (800, 100))
+        img = torch.tensor(img).float()
+        
+        self.eval()
+        # If img lacks a batch dimension, add it
+        # Add batch and channel dimensions
+        if img.ndim == 2:
+            img = img.unsqueeze(0)  # (H, W) -> (1, 1, H, W)
+        elif img.ndim == 3:
+            img = img # (C, H, W) -> (1, C, H, W)
+        elif img.ndim == 4:
+            img = img.squeeze(1)  # Remove extra dimension if already in 5D
+        
+        # Transfer input to the appropriate device
+        img = img.to(self.device)
+        # Forward pass through the model
+        with torch.no_grad():
+            outputs = self.forward(img)
+        # Get the predicted class (highest probability)
+        
+        
+        decode_pred = self.ctc_decode(outputs, self.symbols, blank_token=self.num_classes)
+        return decode_pred[0]
+        
+    
 if __name__ == "__main__":
     # Initialize the model
-    model = CRNN()
-    model.load_state_dict(torch.load(os.path.join(option.PathToLetterNet, f"netCRNNX2_51.pt")))
+    model = CRNN(gpu = False)
+    model.load_state_dict(torch.load(os.path.join(option.PathToLetterNet, f"netCRNNX2v2_6.pt")))
     total_params = sum(p.numel() for p in model.parameters())
 
     # Total number of trainable parameters
@@ -514,6 +556,9 @@ if __name__ == "__main__":
     model.test()
     #model.device = "cpu"
     # Train the model
-    #model.ttraining(19)
+    #print(model.run(r"A:\Overførsler\download (1).jpg"))
+    #model.ttraining()
     
-    
+    df = pd.read_csv("accuracy_x2v2.csv")
+    df.plot(x="epoch", y=["loss","val_loss","val_accuracy","train_accuracy"])
+    plt.show()
